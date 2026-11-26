@@ -13,6 +13,7 @@ trailing newline.
 
 import os
 import sys
+import tempfile
 
 JOKE = (
     "The office coffee is so weak it apologized to me, then asked "
@@ -43,8 +44,21 @@ def main() -> int:
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "entry.txt")
     data = JOKE.encode("utf-8")
-    with open(path, "wb") as fh:
-        fh.write(data)
+    # Atomic write: stage in a temp file in the same directory, then
+    # rename, so a crash or interruption never leaves a partial entry.
+    fd, tmp_path = tempfile.mkstemp(dir=out_dir, prefix=".entry-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
     with open(path, "rb") as fh:
         if fh.read() != data:
             raise RuntimeError("round-trip verification failed")
